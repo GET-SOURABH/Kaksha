@@ -267,3 +267,18 @@ button.lvl:hover{box-shadow:inset 0 0 0 2px var(--plum)}
 .lvcard .lvnow{font-size:1.3rem;font-weight:800;letter-spacing:-0.03em;color:var(--plum)}
 .lvcard p{font-size:.8rem}
 .lvcard .r2{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+
+/* Print: only the report cards, one student per page */
+@page{size:A4;margin:12mm}
+@media print{
+  :root,body{background:#fff!important;padding:0!important}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .side,.tabbar,.topbar,.phead,.note,.savebar,.protonote,.fname,.toast,.filters,.link{display:none!important}
+  .app{display:block}
+  .main{padding:0!important}
+  .wrap{max-width:none;gap:0}
+  .cards{gap:0}
+  .cards > div{break-after:page;page-break-after:always}
+  .cards > div:last-child{break-after:auto;page-break-after:auto}
+  .rc{max-width:none;border-radius:0;border:1.5px solid var(--plum);break-inside:avoid}
+}

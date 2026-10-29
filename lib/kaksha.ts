@@ -176,8 +176,8 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     const sd = new Date();
     sd.setDate(sd.getDate() - 3);
     return {
-      teacher: { name: "Priya Menon", email: "priya.sample@kaksha.in" },
-      cls: { school: "Shivaji Nagar Municipal School", grade: "4", section: "A", year: "2026–27" },
+      teacher: { name: "Neha", email: "neha.sample@kaksha.in" },
+      cls: { school: "Gangotri Public School", grade: "4", section: "A", year: "2026–27" },
       students,
       attendance,
       tests,
@@ -192,6 +192,45 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
   let S: State | null = null;
   // Views below are only drawn while logged in, so they read the state through D().
   const D = (): State => S as State;
+
+  /* ---------- saving (in this browser only) ---------- */
+  const KEY_CLASS = "kaksha:class:";
+  const KEY_SESSION = "kaksha:session";
+  const SAMPLE_EMAIL = "neha.sample@kaksha.in";
+  function keyFor(email: string): string {
+    return KEY_CLASS + (email.trim().toLowerCase() || "teacher");
+  }
+  function store(k: string, v: string | null): void {
+    try {
+      if (v == null) localStorage.removeItem(k);
+      else localStorage.setItem(k, v);
+    } catch {
+      /* storage blocked (private window etc.) — app still works, just won't remember */
+    }
+  }
+  function load(k: string): string | null {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  }
+  function save(): void {
+    if (!S) return;
+    store(keyFor(S.teacher.email), JSON.stringify(S));
+    store(KEY_SESSION, S.teacher.email || "teacher");
+  }
+  function loadClass(email: string): State | null {
+    const raw = load(keyFor(email));
+    if (!raw) return null;
+    try {
+      const x = JSON.parse(raw) as State;
+      return x && Array.isArray(x.students) && Array.isArray(x.tests) && x.ll ? x : null;
+    } catch {
+      return null;
+    }
+  }
+
   let view: View = "home";
   let param: string | null = null;
   let authTab = "login";
@@ -460,7 +499,9 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       '<div class="topbar"><span class="crumb">Class ' + esc(c.grade) + "-" + esc(c.section) + " <span>· " + esc(c.school) + " · " + esc(c.year) + "</span></span>" +
       '<div class="me"><span class="me-av">' + esc(initials(S.teacher.name)) + '</span><span class="me-name">' + esc(S.teacher.name) +
       '</span><button class="btn small" data-act="logout">Log out</button></div></div>';
-    const protonote = '<p class="protonote">Prototype' + (S.sample ? " with sample data" : "") + ". Changes reset when you reload the page.</p>";
+    const protonote =
+      '<p class="protonote">' + (S.sample ? "Sample class. " : "") + "Your changes are saved in this browser only." +
+      (S.sample ? ' <button class="link" data-act="resetsample">Reset sample data</button>' : "") + "</p>";
     let body: string;
     switch (view) {
       case "students":
@@ -488,6 +529,7 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
         body = homeView();
     }
     root.innerHTML = '<div class="app">' + side + '<main class="main"><div class="wrap">' + strip + body + protonote + "</div></main>" + tabs + "</div>";
+    save();
   }
   function go(v: View, p?: string | null): void {
     view = v;
@@ -507,7 +549,7 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
   /* ----- Auth ----- */
   function authView(): string {
     const login =
-      '<form id="f-login" class="panel"><div class="field"><label for="l-email">Email</label><input class="input" id="l-email" type="email" value="priya.sample@kaksha.in" autocomplete="off"></div>' +
+      '<form id="f-login" class="panel"><div class="field"><label for="l-email">Email</label><input class="input" id="l-email" type="email" value="neha.sample@kaksha.in" autocomplete="off"></div>' +
       '<div class="field"><label for="l-pass">Password</label><input class="input" id="l-pass" type="password" value="sample123"></div>' +
       '<button class="btn primary" type="submit">Log in</button>' +
       '<p class="muted" style="font-size:.85rem">Prototype: any email works and opens a sample Class 4-A with 30 students.</p></form>';
@@ -984,17 +1026,17 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       return phead("", "Report cards", null, null) + '<div class="panel empty"><h2>No students yet</h2><button class="btn primary" data-act="go" data-view="students" data-add="1">Add students</button></div>';
     const head = phead("End of year", "Report cards", "Every report card is built from the attendance and marks you have already entered.", '<button class="btn primary" data-act="reportall">Print all ' + n + " report cards</button>");
     const note =
-      '<div class="note"><b>How the real version works:</b> this button saves one PDF per student (for example <span class="mono">01_' + esc(st.students[0].name.replace(/\s+/g, "_")) +
-      ".pdf</span>), ready to print or send to parents. In this prototype you can preview them below.</div>";
+      '<div class="note"><b>Tip:</b> each student’s report card prints on its own page. To get a PDF, choose <b>Save as PDF</b> in the print window.</div>';
     let body = "";
     if (reportOne) {
       const s = st.students.find((x) => x.id === reportOne);
       body =
-        '<div class="savebar"><span class="muted">Showing 1 report card</span><button class="link" data-act="reportall">Show all ' + n + '</button></div><div class="cards">' +
+        '<div class="savebar"><span class="actions"><button class="btn small" data-act="print">Print this report card</button><button class="link" data-act="showall">Show all ' + n +
+        '</button></span></div><div class="cards">' +
         (s ? rcHtml(s) : "") + "</div>";
     } else if (reportsShown) {
       body =
-        '<div class="savebar"><span class="pill good">' + n + ' report cards ready</span><span class="muted">Scroll to preview each one</span></div><div class="cards">' +
+        '<div class="savebar"><span class="pill good">' + n + ' report cards ready</span><button class="btn small" data-act="print">Print</button></div><div class="cards">' +
         st.students.map(rcHtml).join("") + "</div>";
     } else {
       body =
@@ -1033,9 +1075,10 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       authTab = ds.tab || "login";
       render();
     } else if (a === "sample") {
-      S = sampleState();
+      S = loadClass(SAMPLE_EMAIL) || sampleState();
       go("home");
     } else if (a === "logout") {
+      store(KEY_SESSION, null);
       S = null;
       view = "home";
       attDraft = null;
@@ -1119,12 +1162,21 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     } else if (a === "llunfocus") {
       llFocus = null;
       render();
-    } else if (a === "reportall") {
+    } else if (a === "reportall" || a === "showall") {
       reportsShown = true;
       reportOne = null;
       view = "reports";
       render();
-      toast(st.students.length + " report cards created");
+      if (a === "reportall") setTimeout(() => window.print(), 60);
+    } else if (a === "print") {
+      window.print();
+    } else if (a === "resetsample") {
+      if (!window.confirm("Reset the sample class? All changes to it will be lost.")) return;
+      S = sampleState();
+      attDraft = null;
+      testDraft = null;
+      go("home");
+      toast("Sample class reset");
     } else if (a === "reportone") {
       reportOne = ds.param || null;
       go("reports");
@@ -1140,7 +1192,13 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       return x ? x.value.trim() : "";
     };
     if (f.id === "f-login") {
-      S = sampleState();
+      // Prototype login: opens this email's saved class, or a fresh sample class.
+      const email = v("l-email") || SAMPLE_EMAIL;
+      S = loadClass(email);
+      if (!S) {
+        S = sampleState();
+        S.teacher.email = email;
+      }
       go("home");
     } else if (f.id === "f-signup") {
       S = {
@@ -1226,6 +1284,7 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     } else if (el.id === "remark") {
       const s = st.students.find((x) => x.id === el.dataset.id);
       if (s) s.remark = el.value;
+      save();
     }
   }
 
@@ -1235,6 +1294,7 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     if (el.classList && el.classList.contains("llsel") && el.dataset.id) {
       const rr = S.ll[llSub][el.dataset.id];
       if (rr) rr.now = Number(el.value);
+      save();
     }
     if (el.id === "attdate" && el.value) {
       attDate = el.value > TODAY ? TODAY : el.value;
@@ -1246,6 +1306,10 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
   document.addEventListener("submit", onSubmit);
   document.addEventListener("input", onInput);
   document.addEventListener("change", onChange);
+
+  // Reopen the class that was open last time on this browser.
+  const session = load(KEY_SESSION);
+  if (session) S = loadClass(session);
 
   render();
 
