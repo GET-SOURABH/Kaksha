@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+.DS_Store
+.vercel/
+
+# Local environment files can contain credentials.
+.env
+.env.*
+!.env.example
