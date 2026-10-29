@@ -1031,12 +1031,12 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     if (reportOne) {
       const s = st.students.find((x) => x.id === reportOne);
       body =
-        '<div class="savebar"><span class="actions"><button class="btn small" data-act="print">Print this report card</button><button class="link" data-act="showall">Show all ' + n +
+        '<div class="savebar">' + '<button class="link" data-act="reportlist">← Back to student list</button>' + '<span class="actions"><button class="btn small" data-act="print">Print this report card</button><button class="link" data-act="showall">Show all ' + n +
         '</button></span></div><div class="cards">' +
         (s ? rcHtml(s) : "") + "</div>";
     } else if (reportsShown) {
       body =
-        '<div class="savebar"><span class="pill good">' + n + ' report cards ready</span><button class="btn small" data-act="print">Print</button></div><div class="cards">' +
+        '<div class="savebar">' + '<button class="link" data-act="reportlist">← Back to student list</button>' + '<span class="actions"><span class="pill good">' + n + ' report cards ready</span><button class="btn small" data-act="print">Print</button></span></div><div class="cards">' +
         st.students.map(rcHtml).join("") + "</div>";
     } else {
       body =
@@ -1168,6 +1168,11 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       view = "reports";
       render();
       if (a === "reportall") setTimeout(() => window.print(), 60);
+    } else if (a === "reportlist") {
+      reportsShown = false;
+      reportOne = null;
+      render();
+      window.scrollTo(0, 0);
     } else if (a === "print") {
       window.print();
     } else if (a === "resetsample") {
