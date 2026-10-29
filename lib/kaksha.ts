@@ -176,8 +176,8 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     const sd = new Date();
     sd.setDate(sd.getDate() - 3);
     return {
-      teacher: { name: "Neha", email: "neha.sample@kaksha.in" },
-      cls: { school: "Gangotri Public School", grade: "4", section: "A", year: "2026–27" },
+      teacher: { name: "Priya Menon", email: "priya.sample@kaksha.in" },
+      cls: { school: "Shivaji Nagar Municipal School", grade: "4", section: "A", year: "2026–27" },
       students,
       attendance,
       tests,
@@ -507,7 +507,7 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
   /* ----- Auth ----- */
   function authView(): string {
     const login =
-      '<form id="f-login" class="panel"><div class="field"><label for="l-email">Email</label><input class="input" id="l-email" type="email" value="neha.sample@kaksha.in" autocomplete="off"></div>' +
+      '<form id="f-login" class="panel"><div class="field"><label for="l-email">Email</label><input class="input" id="l-email" type="email" value="priya.sample@kaksha.in" autocomplete="off"></div>' +
       '<div class="field"><label for="l-pass">Password</label><input class="input" id="l-pass" type="password" value="sample123"></div>' +
       '<button class="btn primary" type="submit">Log in</button>' +
       '<p class="muted" style="font-size:.85rem">Prototype: any email works and opens a sample Class 4-A with 30 students.</p></form>';
