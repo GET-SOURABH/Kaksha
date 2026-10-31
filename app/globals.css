@@ -368,3 +368,25 @@ button.lvl:hover{box-shadow:inset 0 0 0 2px var(--plum)}
   .ptm-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .ptm-facts{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
+
+/* Learning levels: List / Groups switch and group cards */
+.seg2{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px;background:var(--bg)}
+.seg2 button{border:0;background:none;border-radius:999px;padding:6px 16px;font-weight:800;font-size:.85rem;cursor:pointer;color:var(--muted);font-family:inherit}
+.seg2 button.on{background:var(--plum);color:var(--on-plum)}
+.lvgroups{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+.lvgroup{border:1px solid var(--line);border-top:6px solid var(--lv1);border-radius:20px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;background:var(--surface);min-width:0}
+.lvgroup.b0{border-top-color:var(--lv2)} .lvgroup.b1{border-top-color:var(--lv1)} .lvgroup.b2{border-top-color:var(--lv0)} .lvgroup.bn{border-top-color:var(--line)}
+.lvg-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.lvg-head h3{font-size:1.15rem;font-weight:800;letter-spacing:-0.03em}
+.lvg-head .muted{font-size:.78rem;font-weight:700}
+.lvg-count{min-width:36px;height:36px;border-radius:50%;background:var(--cream);color:var(--plum);display:grid;place-items:center;font-weight:800;flex:none}
+.lvg-list{display:flex;flex-direction:column}
+.lvg-row{display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 0;border:0;border-top:1px solid var(--line);background:none;text-align:left;cursor:pointer;font-family:inherit;color:inherit}
+.lvg-row:first-child{border-top:0}
+.lvg-row:hover b{text-decoration:underline;text-decoration-color:var(--orange)}
+.lvg-row .r{color:var(--muted);font-size:.75rem;font-weight:800;font-variant-numeric:tabular-nums}
+.lvg-row b{font-weight:700;color:var(--plum);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lvg-lv{font-size:.78rem;font-weight:700;color:var(--muted);white-space:nowrap}
+.lvg-lv i{font-style:normal;color:var(--good)}
+.lvg-foot{align-self:flex-start;font-size:.85rem;margin-top:auto}
+.phead > .seg2{display:inline-flex;flex-direction:row;gap:0;align-self:center}

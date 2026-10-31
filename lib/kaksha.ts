@@ -292,7 +292,8 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     reportOne: string | null = null;
   let llSub: Sub = "lit",
     llEdit = false,
-    llFocus: number | null = null;
+    llFocus: number | null = null,
+    llView: "list" | "groups" = "list";
   const remarkTurn: Record<string, number> = {}; // how many times "New wording" was pressed per student
   let agTab: AgTab = "plan",
     planDate = TODAY,
@@ -1015,6 +1016,38 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     }
     return o;
   }
+  /** Card view: one card per level, each listing the students at that level. */
+  function levelGroupsHtml(sub: Sub): string {
+    const groups = groupsFor(sub);
+    if (!groups.length) return '<p class="muted">No levels recorded yet.</p>';
+    return (
+      '<p class="muted" style="font-size:.85rem">' + groups.length + " groups, from lowest to highest level. Use them for group work and practice sheets.</p>" +
+      '<div class="lvgroups">' +
+      groups
+        .map((g) => {
+          const b = bandOf(g.level);
+          return (
+            '<div class="lvgroup b' + (b == null ? "n" : b) + '"><div class="lvg-head"><div><h3>' + esc(g.label) + ' level</h3><span class="muted">' + (b == null ? "" : BANDS[b]) +
+            '</span></div><span class="lvg-count">' + g.students.length + "</span></div>" +
+            '<div class="lvg-list">' +
+            g.students
+              .map((s) => {
+                const r = llOf(sub, s.id);
+                const gr = growthOf(r);
+                return (
+                  '<button class="lvg-row" data-act="go" data-view="student" data-param="' + s.id + '"><span class="r">' + String(s.roll).padStart(2, "0") + "</span><b>" + esc(s.name) +
+                  "</b><span class=\"lvg-lv\">" + (r ? lvLabel(r.now) : "") + (gr != null && gr > 0 ? ' <i>+' + gr + "</i>" : "") + "</span></button>"
+                );
+              })
+              .join("") +
+            "</div>" +
+            '<button class="link lvg-foot" data-act="lvsheet">Practice sheet for this group →</button></div>'
+          );
+        })
+        .join("") +
+      "</div>"
+    );
+  }
   function skillsView(): string {
     const st = D();
     const n = st.students.length,
@@ -1099,11 +1132,18 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
         );
       })
       .join("");
+    const grouped = llView === "groups" && !llEdit;
+    const toggle = llEdit
+      ? '<span class="status unsaved">Editing</span>'
+      : '<div class="seg2" role="group" aria-label="View"><button class="' + (grouped ? "" : "on") + '" data-act="llview" data-v="list">List</button><button class="' + (grouped ? "on" : "") + '" data-act="llview" data-v="groups">Groups</button></div>';
     const table =
-      '<div class="panel"><div class="phead"><h2>Every student · ' + SUBJ[sub] + "</h2>" + (llEdit ? '<span class="status unsaved">Editing</span>' : "") + "</div>" +
+      '<div class="panel"><div class="phead"><h2>Every student · ' + SUBJ[sub] + "</h2>" + toggle + "</div>" +
       (llEdit ? '<p class="note">Choose each student’s current level after this month’s check, then press Save levels. Growth updates automatically.</p>' : "") +
-      '<div class="sgrid"><table class="lltable"><thead><tr><th class="sticky">Student</th><th>Baseline</th><th>Now</th><th>Growth</th><th>Status</th></tr></thead><tbody>' +
-      rows + "</tbody></table></div></div>";
+      (grouped
+        ? levelGroupsHtml(sub)
+        : '<div class="sgrid"><table class="lltable"><thead><tr><th class="sticky">Student</th><th>Baseline</th><th>Now</th><th>Growth</th><th>Status</th></tr></thead><tbody>' +
+          rows + "</tbody></table></div>") +
+      "</div>";
     return head + filt + stats + chart + focus + table;
   }
 
@@ -1760,6 +1800,11 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       printGroup = a === "sheetprint" ? ds.key || null : null;
       render();
       setTimeout(() => window.print(), 60);
+    } else if (a === "llview") {
+      llView = ds.v === "groups" ? "groups" : "list";
+      render();
+    } else if (a === "lvsheet") {
+      go("sheets");
     } else if (a === "agtab") {
       agTab = (ds.tab as AgTab) || "plan";
       ptmOne = null;
