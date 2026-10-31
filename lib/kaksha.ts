@@ -2,6 +2,8 @@
    Ported from the original single-file HTML prototype to TypeScript.
    startKaksha() draws the app into `root` and returns a cleanup function. */
 
+import { builtInSheet, type Sheet } from "./sheets";
+
 /* ---------- types ---------- */
 type Sub = "lit" | "math";
 type LevelKey = "base" | "now";
@@ -36,6 +38,7 @@ interface State {
   llBase: string | null;
   llDate: string | null;
   sample: boolean;
+  sheets?: Record<string, Sheet>; // practice sheets, key = "lit:2" (subject:level)
 }
 interface SubjectTotal {
   subject: string;
@@ -44,7 +47,7 @@ interface SubjectTotal {
   abs: number;
 }
 type Tone = "good" | "warn" | "bad" | "na";
-type View = "home" | "students" | "student" | "attendance" | "tests" | "test" | "skills" | "reports";
+type View = "home" | "students" | "student" | "attendance" | "tests" | "test" | "skills" | "sheets" | "reports" | "remarks";
 
 export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void {
   /* ---------- helpers ---------- */
@@ -246,6 +249,8 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
   let llSub: Sub = "lit",
     llEdit = false,
     llFocus: number | null = null;
+  const remarkTurn: Record<string, number> = {}; // how many times "New wording" was pressed per student
+  let printGroup: string | null = null; // which practice-sheet group to print (null = all)
 
   /* ---------- calculations ---------- */
   function attStats(id: string): { p: number; t: number; pct: number | null } {
@@ -328,17 +333,74 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     });
     return order.map((k) => map[k]);
   }
+  /* ---------- remark writer ----------
+     Builds a personal remark from marks, attendance and learning levels — no AI, no cost.
+     `turn` picks different wording, so pressing "New wording" gives a fresh version. */
+  const RM = {
+    top: ["{F} has had an excellent term, and {best} is a real strength.", "{F} has worked very well this term, especially in {best}.", "{F} is a keen and careful learner who has done very well in {best}."],
+    good: ["{F} has made steady progress this term and does well in {best}.", "{F} works sincerely in class and has done well in {best}.", "{F} is growing in confidence, and {best} is a strong subject."],
+    mid: ["{F} is making progress this term and does best in {best}.", "{F} tries hard in class and is doing well in {best}.", "{F} is learning steadily, with {best} as the strongest subject."],
+    low: ["{F} has shown effort this term, especially in {best}.", "{F} is starting to make progress, especially in {best}.", "{F} needs some extra support this year but is trying hard in {best}."],
+    weak: ["{weak} needs more practice, and ten minutes of practice at home each day will help.", "Daily practice of {weak} at home will help {F} improve.", "With a little regular practice, {weak} will get better."],
+    readBig: ["Reading has grown from {from} to {to} level this year, which is a big step.", "{F}’s reading has improved a lot, from {from} to {to} level."],
+    readUp: ["Reading has improved from {from} to {to} level.", "{F} now reads at {to} level, up from {from}."],
+    readHome: ["Reading aloud at home for ten minutes every day will help {F} reach grade level.", "Please help {F} read a short story aloud at home each day."],
+    mathHome: ["Practising tables at home will help {F} in Maths.", "Counting and simple sums at home will build {F}’s confidence in Maths."],
+    attLow: ["Coming to school every day will help {F} keep up.", "More regular attendance will help {F} learn even more."],
+    attHigh: ["{F} also comes to school very regularly.", "{F}’s regular attendance is a big help."],
+  };
+  function hash(str: string): number {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+  function remarkFor(s: Student, turn: number): string {
+    const F = s.name.split(" ")[0];
+    let k = hash(s.id + ":" + turn);
+    const pick = (opts: string[]): string => {
+      const x = opts[k % opts.length];
+      k = Math.imul(k ^ (k >>> 13), 2654435761) >>> 0;
+      return x;
+    };
+    const fill = (t: string, v: Record<string, string>) => t.replace(/\{(\w+)\}/g, (_m, n: string) => v[n] ?? "");
+    const subs = subjectsFor(s.id)
+      .filter((x) => x.max)
+      .map((x) => ({ subject: x.subject, p: Math.round((x.got / x.max) * 100) }));
+    const at = attStats(s.id).pct;
+    const out: string[] = [];
+    let weakLine = false;
+    if (!subs.length) out.push(F + "’s marks have not been entered yet.");
+    else {
+      const best = subs.reduce((a, b) => (b.p > a.p ? b : a));
+      const weak = subs.reduce((a, b) => (b.p < a.p ? b : a));
+      const avg = avgPct(s.id) ?? 0;
+      const v = { F, best: best.subject, weak: weak.subject };
+      out.push(fill(pick(avg >= 80 ? RM.top : avg >= 60 ? RM.good : avg >= 40 ? RM.mid : RM.low), v));
+      if (weak.subject !== best.subject && weak.p < 60) {
+        out.push(fill(pick(RM.weak), v));
+        weakLine = true;
+      }
+    }
+    const r = D().ll.lit[s.id] || null,
+      g = growthOf(r);
+    if (r && g != null) {
+      const v = { F, from: lvLabel(r.base), to: lvLabel(r.now) };
+      if (g >= GOAL) out.push(fill(pick(RM.readBig), v));
+      else if (g >= 0.5) out.push(fill(pick(RM.readUp), v));
+      else if (bandOf(r.now) !== 0) out.push(fill(pick(RM.readHome), v));
+    }
+    const m = D().ll.math[s.id] || null;
+    if (!weakLine && m && bandOf(m.now) === 2) out.push(fill(pick(RM.mathHome), { F }));
+    if (at != null && at < 75) out.push(fill(pick(RM.attLow), { F }));
+    else if (at != null && at >= 95 && out.length < 4) out.push(fill(pick(RM.attHigh), { F }));
+    return out.slice(0, 4).join(" ");
+  }
+  /** The suggested remark shown in grey and used when the teacher leaves the box empty. */
   function autoRemark(s: Student): string {
-    const a = avgPct(s.id),
-      at = attStats(s.id).pct;
-    let txt: string;
-    if (a == null) txt = "Marks not entered yet.";
-    else if (a >= 80) txt = "Excellent work this year. Keep reading every day.";
-    else if (a >= 60) txt = "Steady progress. Keep practising daily at home.";
-    else if (a >= 40) txt = "Improving. Needs regular practice in weaker subjects.";
-    else txt = "Needs extra support. Daily home practice will help a lot.";
-    if (at != null && at < 75) txt += " Please ensure regular attendance.";
-    return txt;
+    return remarkFor(s, 0);
   }
   function needsAttention(): Student[] {
     return D().students.filter((s) => {
@@ -470,7 +532,7 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     ["reports", "Report cards"],
   ];
   function navKey(): View {
-    return view === "student" ? "students" : view === "test" ? "tests" : view;
+    return view === "student" ? "students" : view === "test" ? "tests" : view === "sheets" ? "skills" : view === "remarks" ? "reports" : view;
   }
 
   /* ---------- render ---------- */
@@ -522,8 +584,14 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       case "skills":
         body = skillsView();
         break;
+      case "sheets":
+        body = sheetsView();
+        break;
       case "reports":
         body = reportsView();
+        break;
+      case "remarks":
+        body = remarksView();
         break;
       default:
         body = homeView();
@@ -753,8 +821,9 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       '<div class="panel"><h2>All marks</h2><div class="tablewrap"><table><thead><tr><th>Subject</th><th>Test</th><th>Date</th><th class="n">Marks</th><th class="n">%</th></tr></thead><tbody>' +
       (rows || '<tr><td colspan="5" class="muted">No tests yet.</td></tr>') + "</tbody></table></div></div>" +
       '<div class="panel"><h2>Teacher’s remark for report card</h2><textarea class="input" id="remark" data-id="' + s.id + '" placeholder="' + esc(autoRemark(s)) + '">' + esc(s.remark) +
-      '</textarea><p class="muted" style="font-size:.85rem">Leave empty to use the suggested remark shown above.</p>' +
-      '<div><button class="btn" data-act="reportone" data-param="' + s.id + '">View report card</button></div></div>'
+      '</textarea><p class="muted" style="font-size:.85rem">Press <b>Write remark</b> for a remark based on this student’s marks, attendance and reading level, then change anything you like. Press <b>New wording</b> for a different version. If you leave the box empty, the grey suggestion is printed.</p>' +
+      '<div class="actions"><button class="btn" data-act="remarkone" data-id="' + s.id + '">' + (s.remark.trim() ? "New wording" : "Write remark") + "</button>" +
+      '<button class="btn" data-act="reportone" data-param="' + s.id + '">View report card</button></div></div>'
     );
   }
 
@@ -911,7 +980,8 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
         (st.llDate && st.llBase ? " Baseline " + fmt(st.llBase) + ", last checked " + fmt(st.llDate) + "." : ""),
       llEdit
         ? '<button class="btn primary" data-act="lldone">Save levels</button>'
-        : '<button class="btn primary" data-act="lledit">' + (st.llBase ? "Update levels" : "Add baseline levels") + "</button>"
+        : (st.llBase ? '<button class="btn" data-act="go" data-view="sheets">Practice sheets</button>' : "") +
+          '<button class="btn primary" data-act="lledit">' + (st.llBase ? "Update levels" : "Add baseline levels") + "</button>"
     );
     const filt = '<div class="filters">' + SUBS.map((k) => '<button class="fbtn' + (sub === k ? " on" : "") + '" data-act="llsub" data-sub="' + k + '">' + SUBJ[k] + "</button>").join("") + "</div>";
     const now = bandCounts(sub, "now"),
@@ -1024,9 +1094,14 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     const n = st.students.length;
     if (!n)
       return phead("", "Report cards", null, null) + '<div class="panel empty"><h2>No students yet</h2><button class="btn primary" data-act="go" data-view="students" data-add="1">Add students</button></div>';
-    const head = phead("End of year", "Report cards", "Every report card is built from the attendance and marks you have already entered.", '<button class="btn primary" data-act="reportall">Print all ' + n + " report cards</button>");
+    const head = phead(
+      "End of year",
+      "Report cards",
+      "Every report card is built from the attendance and marks you have already entered.",
+      '<button class="btn" data-act="go" data-view="remarks">Remarks</button><button class="btn primary" data-act="reportall">Print all ' + n + " report cards</button>"
+    );
     const note =
-      '<div class="note"><b>Tip:</b> each student’s report card prints on its own page. To get a PDF, choose <b>Save as PDF</b> in the print window.</div>';
+      '<div class="note"><b>Tip:</b> open <b>Remarks</b> to fill every student’s remark in one click and check them all in one place. Each report card prints on its own page; to get a PDF, choose <b>Save as PDF</b> in the print window.</div>';
     let body = "";
     if (reportOne) {
       const s = st.students.find((x) => x.id === reportOne);
@@ -1059,6 +1134,123 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
         "</div>";
     }
     return head + note + body;
+  }
+
+  /* ----- Remarks (review all) ----- */
+  function remarksView(): string {
+    const st = D();
+    const n = st.students.length;
+    if (!n) return phead("", "Remarks", null, null) + '<div class="panel empty"><h2>No students yet</h2><button class="btn primary" data-act="go" data-view="students" data-add="1">Add students</button></div>';
+    const done = st.students.filter((s) => s.remark.trim()).length;
+    const head = phead(
+      "Report cards",
+      "Remarks",
+      "Kaksha writes each remark from the student’s marks, attendance and learning levels. Read them, change anything you like, then print. Changes save as you type.",
+      '<button class="btn primary" data-act="remarksall">' + (done === n ? "New wording for all" : "Fill " + (n - done) + " empty remark" + (n - done > 1 ? "s" : "")) + "</button>"
+    );
+    const rows = st.students
+      .map((s) => {
+        return (
+          '<div class="rmkrow"><div class="rmkwho"><span class="roll">' + String(s.roll).padStart(2, "0") + '</span><b>' + esc(s.name) + "</b>" +
+          '<button class="fbtn" data-act="remarkone" data-id="' + s.id + '">' + (s.remark.trim() ? "New wording" : "Write") + "</button>" +
+          '</div><textarea class="input rmk" data-id="' + s.id + '" rows="3" placeholder="' + esc(autoRemark(s)) + '">' + esc(s.remark) + "</textarea></div>"
+        );
+      })
+      .join("");
+    return (
+      '<div><button class="link" data-act="go" data-view="reports">← Report cards</button></div>' +
+      head +
+      '<div class="savebar"><span class="pill ' + (done === n ? "good" : "warn") + '">' + done + " of " + n + ' remarks written</span><span class="muted" style="font-size:.85rem">Empty boxes use the grey suggestion.</span></div>' +
+      '<div class="panel rmklist">' + rows + "</div>"
+    );
+  }
+
+  /* ----- Practice sheets ----- */
+  interface Group {
+    key: string;
+    level: number;
+    label: string;
+    students: Student[];
+  }
+  function groupsFor(sub: Sub): Group[] {
+    const map: Record<number, Student[]> = {};
+    D().students.forEach((s) => {
+      const r = llOf(sub, s.id);
+      if (!r) return;
+      const L = Math.floor(r.now);
+      (map[L] = map[L] || []).push(s);
+    });
+    return Object.keys(map)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .map((L) => ({ key: sub + ":" + L, level: L, label: lvLabel(L), students: map[L] }));
+  }
+  function sheetHtml(sh: Sheet, sub: Sub, label: string, student: Student | null): string {
+    const c = D().cls;
+    let num = 0;
+    const secs = sh.sections
+      .map((sec) => {
+        const start = num + 1;
+        num += sec.items.length;
+        return '<div class="sh-sec"><h4>' + esc(sec.heading) + '</h4><ol start="' + start + '">' + sec.items.map((it) => "<li>" + esc(it) + "</li>").join("") + "</ol></div>";
+      })
+      .join("");
+    return (
+      '<article class="rc sheet"><header class="rc-head"><span class="eyebrow">Practice sheet · ' + SUBJ[sub] + " · " + esc(label) + " level</span><h3>" + esc(sh.title) + "</h3></header>" +
+      '<div class="rc-meta"><div><span>Name:</span> <b>' + (student ? esc(student.name) : "______________________") + "</b></div><div><span>Date:</span> <b>____________</b></div>" +
+      "<div><span>Class:</span> <b>" + esc(c.grade) + "-" + esc(c.section) + "</b></div><div><span>School:</span> <b>" + esc(c.school) + "</b></div></div>" +
+      (sh.intro ? '<p class="sh-intro">' + esc(sh.intro) + "</p>" : "") +
+      (sh.passage ? '<div class="sh-passage">' + esc(sh.passage).replace(/\n+/g, "<br>") + "</div>" : "") +
+      secs +
+      "</article>"
+    );
+  }
+  function sheetsView(): string {
+    const st = D();
+    const sub = llSub;
+    const back = '<div><button class="link" data-act="go" data-view="skills">← Learning levels</button></div>';
+    if (!st.llBase)
+      return back + phead("", "Practice sheets", null, null) + '<div class="panel empty"><h2>Add learning levels first</h2><p class="muted">Sheets are made for groups of students at the same level.</p><button class="btn primary" data-act="go" data-view="skills">Go to learning levels</button></div>';
+    const groups = groupsFor(sub);
+    const sheets = st.sheets || {};
+    const made = groups.filter((g) => sheets[g.key]).length;
+    const head = phead(
+      "Learning levels",
+      "Practice sheets",
+      "Students are grouped by their current " + SUBJ[sub].toLowerCase() + " level, and each group gets its own sheet. When you print, every student gets a copy with their name on it.",
+      '<button class="btn' + (made ? "" : " primary") + '" data-act="sheetsall">' + (made ? "New sheets for all" : "Make all sheets") + "</button>" +
+        (made ? '<button class="btn primary" data-act="sheetsprint">Print all (' + groups.filter((g) => sheets[g.key]).reduce((a, g) => a + g.students.length, 0) + " copies)</button>" : "")
+    );
+    const filt = '<div class="filters">' + SUBS.map((k) => '<button class="fbtn' + (sub === k ? " on" : "") + '" data-act="llsub" data-sub="' + k + '">' + SUBJ[k] + "</button>").join("") + "</div>";
+    const list = groups
+      .map((g) => {
+        const sh = sheets[g.key];
+        return (
+          '<div class="panel sgroup"><div class="phead"><div><span class="eyebrow">' + g.students.length + " student" + (g.students.length > 1 ? "s" : "") + "</span><h2>" + esc(g.label) + " level</h2></div>" +
+          '<div class="actions"><button class="btn" data-act="sheetone" data-key="' + g.key + '">' + (sh ? "New sheet" : "Make sheet") + "</button>" +
+          (sh ? '<button class="btn primary" data-act="sheetprint" data-key="' + g.key + '">Print ' + g.students.length + " cop" + (g.students.length > 1 ? "ies" : "y") + "</button>" : "") +
+          "</div></div>" +
+          '<div class="names">' + g.students.map((s) => '<button class="namechip" data-act="go" data-view="student" data-param="' + s.id + '">' + esc(s.name) + "</button>").join("") + "</div>" +
+          (sh
+            ? '<p class="muted" style="font-size:.78rem">Made ' + fmtShort(sh.made) + ". Press New sheet for a different one.</p>" + sheetHtml(sh, sub, g.label, null)
+            : '<p class="muted">No sheet yet.</p>') +
+          "</div>"
+        );
+      })
+      .join("");
+    // Print-only copies: one per student, with their name filled in.
+    const printing = groups
+      .filter((g) => sheets[g.key] && (printGroup == null || printGroup === g.key))
+      .map((g) => g.students.map((s) => "<div>" + sheetHtml(sheets[g.key], sub, g.label, s) + "</div>").join(""))
+      .join("");
+    return back + head + filt + (groups.length ? list : '<div class="panel empty"><p class="muted">No levels recorded for ' + SUBJ[sub] + " yet.</p></div>") + '<div class="print-only cards">' + printing + "</div>";
+  }
+  function makeSheet(g: Group, sub: Sub): void {
+    const st = D();
+    st.sheets = st.sheets || {};
+    const old = st.sheets[g.key];
+    const turn = old && typeof old.v === "number" ? old.v + 1 : 0;
+    st.sheets[g.key] = builtInSheet(sub, g.level, hash(g.key + ":" + turn + ":" + Date.now()), TODAY, turn);
   }
 
   /* ---------- events ---------- */
@@ -1168,6 +1360,46 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       view = "reports";
       render();
       if (a === "reportall") setTimeout(() => window.print(), 60);
+    } else if (a === "remarkone" && ds.id) {
+      const s = st.students.find((x) => x.id === ds.id);
+      if (!s) return;
+      const turn = s.remark.trim() ? (remarkTurn[s.id] || 0) + 1 : remarkTurn[s.id] || 0;
+      remarkTurn[s.id] = turn;
+      s.remark = remarkFor(s, turn);
+      render();
+    } else if (a === "remarksall") {
+      const empty = st.students.filter((s) => !s.remark.trim());
+      if (empty.length) {
+        empty.forEach((s) => {
+          s.remark = remarkFor(s, remarkTurn[s.id] || 0);
+        });
+        render();
+        toast(empty.length + " remarks filled. Read them and change anything you like.");
+      } else {
+        if (!window.confirm("Give every student a fresh remark? Anything you typed in the remarks will be replaced.")) return;
+        st.students.forEach((s) => {
+          remarkTurn[s.id] = (remarkTurn[s.id] || 0) + 1;
+          s.remark = remarkFor(s, remarkTurn[s.id]);
+        });
+        render();
+        toast("New wording for all " + st.students.length + " remarks.");
+      }
+    } else if (a === "sheetone" && ds.key) {
+      const g = groupsFor(llSub).find((x) => x.key === ds.key);
+      if (!g) return;
+      makeSheet(g, llSub);
+      render();
+      toast("Sheet ready for " + g.label + " level.");
+    } else if (a === "sheetsall") {
+      const groups = groupsFor(llSub);
+      if (!groups.length) return;
+      groups.forEach((g) => makeSheet(g, llSub));
+      render();
+      toast(groups.length + " sheets ready.");
+    } else if (a === "sheetprint" || a === "sheetsprint") {
+      printGroup = a === "sheetprint" ? ds.key || null : null;
+      render();
+      setTimeout(() => window.print(), 60);
     } else if (a === "reportlist") {
       reportsShown = false;
       reportOne = null;
@@ -1286,7 +1518,7 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       const errs = root.querySelectorAll(".mk.err").length,
         te = byId("terr");
       if (te) te.textContent = errs ? errs + " mark" + (errs > 1 ? "s are" : " is") + " above " + t.max + " or not a number" : "";
-    } else if (el.id === "remark") {
+    } else if (el.id === "remark" || el.classList.contains("rmk")) {
       const s = st.students.find((x) => x.id === el.dataset.id);
       if (s) s.remark = el.value;
       save();

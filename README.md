@@ -21,21 +21,22 @@ If prompted, authorize Vercel to access this repository. Use these settings:
 - Install command: **npm ci**
 - Build command: **npm run build**
 - Output directory: leave the **Next.js default**
-- Environment variables: **none currently required**
+- Environment variables: **none needed**
 
-Click **Deploy** and wait for the deployment to become **Ready**. Open the
-production URL to verify the site. With the GitHub integration connected, future
-pushes to `main` trigger production deployments automatically.
+Click **Deploy** and wait for the deployment to become **Ready**. With the GitHub
+integration connected, future pushes to `main` trigger production deployments automatically.
 
 To check a production build locally, run `npm run build`, then `npm start`.
-Keep secrets in local `.env` files or Vercel's Environment Variables settings;
-local environment files are excluded from Git.
 
-The existing app is a prototype: login accepts any email and class data resets
-when the page reloads. Deployment preserves this behavior.
+## Notes
+
+The app is a prototype: login accepts any email, and class data is saved only in
+the browser it was entered in. It uses no paid services: remarks and practice
+sheets are made inside the app, so running costs are zero on Vercel's free plan.
 
 ## Where things are
 - app/globals.css – all the styles
-- lib/kaksha.ts – all the app logic (TypeScript)
+- lib/kaksha.ts – the app screens and logic (TypeScript)
+- lib/sheets.ts – practice sheets (maths questions and reading passages by level)
 - components/KakshaApp.tsx – starts the app on the page
 - app/layout.tsx – page title and fonts

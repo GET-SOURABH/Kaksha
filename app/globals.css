@@ -282,3 +282,40 @@ button.lvl:hover{box-shadow:inset 0 0 0 2px var(--plum)}
   .cards > div:last-child{break-after:auto;page-break-after:auto}
   .rc{max-width:none;border-radius:0;border:1.5px solid var(--plum);break-inside:avoid}
 }
+
+/* AI buttons */
+.btn.ai:disabled,.fbtn.ai:disabled{opacity:.6;cursor:wait;transform:none}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;display:inline-block;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Remarks review */
+.rmklist{gap:0;padding:6px 20px}
+.rmkrow{display:grid;gap:8px;padding:14px 0;border-top:1px solid var(--line)}
+.rmkrow:first-child{border-top:0}
+@media (min-width:760px){.rmkrow{grid-template-columns:230px minmax(0,1fr);align-items:start}}
+.rmkwho{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.rmkwho b{color:var(--plum);font-weight:800}
+.rmkwho .roll{border-right:2px solid var(--margin)}
+.rmk{min-height:84px}
+
+/* Practice sheets */
+.sgroup .names{margin-bottom:2px}
+.sheet{gap:12px}
+.sh-intro{font-weight:700;color:var(--plum)}
+.sh-passage{background:var(--cream);border-radius:12px;padding:12px 14px;line-height:1.75}
+.sh-sec h4{margin:0 0 6px;font-size:.95rem;font-weight:800;color:var(--plum)}
+.sh-sec ol{margin:0;padding-left:24px;display:grid;gap:8px}
+.sh-sec li{line-height:1.6;padding-left:2px}
+.print-only{display:none}
+@media print{
+  .wrap:has(.print-only) > *:not(.print-only){display:none!important}
+  .print-only{display:block!important}
+  .sheet{font-size:13px;gap:10px;padding:18px}
+  .sheet .sh-passage{line-height:1.6}
+  .sh-sec{break-inside:avoid}
+}
+
+/* Button groups inside page headers sit in a row */
+.phead > .actions{flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px}
+.sh-sec li{white-space:pre-wrap}
+@media print{.sh-sec ol{gap:13px}}
