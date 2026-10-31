@@ -39,7 +39,31 @@ interface State {
   llDate: string | null;
   sample: boolean;
   sheets?: Record<string, Sheet>; // practice sheets, key = "lit:2" (subject:level)
+  plans?: Record<string, DayPlan>; // daily plans by date
+  todos?: Todo[];
+  dismissed?: string[]; // suggested tasks the teacher dismissed
+  ptmDate?: string;
+  ptmNotes?: Record<string, string>; // parent meeting notes by student id
 }
+interface PlanRow {
+  id: string;
+  time: string;
+  subject: string;
+  topic: string;
+  done: boolean;
+}
+interface DayPlan {
+  rows: PlanRow[];
+  note: string;
+}
+interface Todo {
+  id: string;
+  text: string;
+  done: boolean;
+  due: string; // yyyy-mm-dd or ""
+  key?: string; // set when it came from a suggestion
+}
+type AgTab = "plan" | "todo" | "ptm";
 interface SubjectTotal {
   subject: string;
   got: number;
@@ -47,7 +71,7 @@ interface SubjectTotal {
   abs: number;
 }
 type Tone = "good" | "warn" | "bad" | "na";
-type View = "home" | "students" | "student" | "attendance" | "tests" | "test" | "skills" | "sheets" | "reports" | "remarks";
+type View = "home" | "students" | "student" | "attendance" | "tests" | "test" | "skills" | "sheets" | "reports" | "remarks" | "agenda";
 
 export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void {
   /* ---------- helpers ---------- */
@@ -188,6 +212,26 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       llBase: iso(bd),
       llDate: iso(sd),
       sample: true,
+      plans: {
+        [TODAY]: {
+          rows: [
+            ["8:00", "Assembly", "Attendance and news of the day"],
+            ["8:30", "English", "Group reading: The lost ball"],
+            ["9:15", "Maths", "Two-digit subtraction with borrowing"],
+            ["10:00", "Break", ""],
+            ["10:20", "Hindi", "Matra practice: chhoti i and badi ee"],
+            ["11:05", "EVS", "Plants around us: leaf walk"],
+            ["11:50", "Practice groups", "Practice sheets by level"],
+          ].map((r, i) => ({ id: "p" + i, time: r[0], subject: r[1], topic: r[2], done: false })),
+          note: "",
+        },
+      },
+      todos: [
+        { id: "td1", text: "Check Unit Test 2 Hindi copies", done: false, due: TODAY },
+        { id: "td2", text: "Send parent meeting notice in the class WhatsApp group", done: false, due: iso(new Date(Date.now() + 3 * 864e5)) },
+        { id: "td3", text: "Set up the reading corner with new storybooks", done: false, due: "" },
+        { id: "td4", text: "Submit attendance register to the headmaster", done: true, due: "" },
+      ],
     };
   }
 
@@ -250,6 +294,11 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     llEdit = false,
     llFocus: number | null = null;
   const remarkTurn: Record<string, number> = {}; // how many times "New wording" was pressed per student
+  let agTab: AgTab = "plan",
+    planDate = TODAY,
+    showDone = false,
+    ptmFilter: "need" | "all" = "need",
+    ptmOne: string | null = null;
   let printGroup: string | null = null; // which practice-sheet group to print (null = all)
 
   /* ---------- calculations ---------- */
@@ -519,12 +568,14 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     tests: '<path d="M6 3.5h9l4 4v13H6z"/><path d="M15 3.5v4h4M9.5 12h6M9.5 16h4"/>',
     skills: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="M14 17.5l2.2 2.2 4-4.5"/>',
     reports: '<path d="M5 3.5h14v17H5z"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/>',
+    agenda: '<rect x="5" y="4.5" width="14" height="16.5" rx="2"/><path d="M9 4.5V3h6v1.5M8.5 10.5l1.5 1.5 2.5-2.5M14 11h2M8.5 16.5l1.5 1.5 2.5-2.5M14 17h2"/>',
   };
   function icon(k: string): string {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + IC[k] + "</svg>";
   }
   const NAV: [View, string][] = [
     ["home", "Home"],
+    ["agenda", "Agenda"],
     ["students", "Students"],
     ["attendance", "Attendance"],
     ["tests", "Tests"],
@@ -554,7 +605,7 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       NAV.map(
         (n) =>
           '<button class="tab' + (nk === n[0] ? " on" : "") + '" data-act="go" data-view="' + n[0] + '">' + icon(n[0]) + "<span>" +
-          (n[0] === "reports" ? "Reports" : n[0] === "skills" ? "Levels" : n[1]) + "</span></button>"
+          (n[0] === "reports" ? "Reports" : n[0] === "skills" ? "Levels" : n[0] === "attendance" ? "Attend" : n[1]) + "</span></button>"
       ).join("") +
       "</nav>";
     const strip =
@@ -589,6 +640,9 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
         break;
       case "reports":
         body = reportsView();
+        break;
+      case "agenda":
+        body = agendaView();
         break;
       case "remarks":
         body = remarksView();
@@ -705,7 +759,7 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
             .join("")
         : '<p class="muted">No tests yet. Create one from the Tests page.</p>') +
       "</div>";
-    return phead("", hello, "Here’s how your class is doing.", null) + today + stats + '<div class="two">' + needList + recent + "</div>" + llHomePanel(n);
+    return phead("", hello, "Here’s how your class is doing.", null) + today + stats + '<div class="two">' + needList + recent + "</div>" + agendaHomePanel() + llHomePanel(n);
   }
 
   /* ----- Students ----- */
@@ -823,7 +877,8 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       '<div class="panel"><h2>Teacher’s remark for report card</h2><textarea class="input" id="remark" data-id="' + s.id + '" placeholder="' + esc(autoRemark(s)) + '">' + esc(s.remark) +
       '</textarea><p class="muted" style="font-size:.85rem">Press <b>Write remark</b> for a remark based on this student’s marks, attendance and reading level, then change anything you like. Press <b>New wording</b> for a different version. If you leave the box empty, the grey suggestion is printed.</p>' +
       '<div class="actions"><button class="btn" data-act="remarkone" data-id="' + s.id + '">' + (s.remark.trim() ? "New wording" : "Write remark") + "</button>" +
-      '<button class="btn" data-act="reportone" data-param="' + s.id + '">View report card</button></div></div>'
+      '<button class="btn" data-act="reportone" data-param="' + s.id + '">View report card</button>' +
+      '<button class="btn" data-act="ptmopen" data-id="' + s.id + '">Parent meeting agenda</button></div></div>'
     );
   }
 
@@ -1253,6 +1308,304 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     st.sheets[g.key] = builtInSheet(sub, g.level, hash(g.key + ":" + turn + ":" + Date.now()), TODAY, turn);
   }
 
+  /* ================= Agenda: today's plan, to-do, parent meeting ================= */
+  function uid(): string {
+    return "x" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+  function shiftDate(d: string, days: number): string {
+    const x = new Date(d + "T00:00:00");
+    x.setDate(x.getDate() + days);
+    return iso(x);
+  }
+  const PERIOD_TIMES = ["8:00", "8:40", "9:20", "10:00", "10:40", "11:20"];
+
+  function agendaView(): string {
+    const st = D();
+    const open = (st.todos || []).filter((t) => !t.done).length;
+    const tabs: [AgTab, string][] = [
+      ["plan", "Today’s plan"],
+      ["todo", "To-do" + (open ? " · " + open : "")],
+      ["ptm", "Parent meeting"],
+    ];
+    const sub =
+      agTab === "plan"
+        ? "Plan each period: what you will teach and when. Tick periods off as you finish them."
+        : agTab === "todo"
+          ? "Your task list. Kaksha also suggests tasks from your class data, like calling parents of absent students."
+          : "A ready agenda for each parent meeting, made from attendance, marks and learning levels. Add notes during the meeting.";
+    const head = phead("Teacher’s agenda", "Agenda", sub, null);
+    const bar = '<div class="filters">' + tabs.map((t) => '<button class="fbtn' + (agTab === t[0] ? " on" : "") + '" data-act="agtab" data-tab="' + t[0] + '">' + t[1] + "</button>").join("") + "</div>";
+    return head + bar + (agTab === "plan" ? planView() : agTab === "todo" ? todoView() : ptmView());
+  }
+
+  /* ----- Today's plan ----- */
+  function subjectList(): string[] {
+    const set = new Set<string>(["English", "Hindi", "Maths", "EVS", "Science", "Social Studies", "Art", "Games", "Library", "Assembly", "Break"]);
+    D().tests.forEach((t) => set.add(t.subject));
+    return Array.from(set);
+  }
+  function planView(): string {
+    const st = D();
+    const plans = st.plans || {};
+    const plan = plans[planDate];
+    const bar =
+      '<div class="panel"><div class="planbar"><button class="btn small" data-act="planday" data-d="-1" aria-label="Previous day">←</button>' +
+      '<input class="input" id="plandate" type="date" value="' + planDate + '" aria-label="Plan date">' +
+      '<button class="btn small" data-act="planday" data-d="1" aria-label="Next day">→</button>' +
+      '<span class="muted planday">' + (planDate === TODAY ? "Today · " : "") + fmt(planDate) + "</span>" +
+      (planDate !== TODAY ? '<button class="link" data-act="planday" data-d="0">Go to today</button>' : "") +
+      "</div></div>";
+    if (!plan) {
+      const earlier = Object.keys(plans)
+        .filter((d) => d !== planDate && plans[d].rows.length)
+        .sort();
+      const last = earlier.filter((d) => d < planDate).pop() || earlier.pop();
+      return (
+        bar +
+        '<div class="panel empty"><h2>No plan for ' + fmt(planDate) + " yet</h2>" +
+        '<p class="muted">Copy your timetable from an earlier day, or start with empty periods.</p><div class="actions" style="justify-content:center">' +
+        (last ? '<button class="btn primary" data-act="plancopy" data-from="' + last + '">Copy timetable from ' + fmtShort(last) + "</button>" : "") +
+        '<button class="btn' + (last ? "" : " primary") + '" data-act="plannew">Start with 6 empty periods</button></div></div>'
+      );
+    }
+    const done = plan.rows.filter((r) => r.done).length;
+    const rows = plan.rows
+      .map(
+        (r) =>
+          '<div class="row planrow' + (r.done ? " isdone" : "") + '">' +
+          '<input class="input plf pt" data-id="' + r.id + '" data-f="time" value="' + esc(r.time) + '" placeholder="Time" aria-label="Time">' +
+          '<div class="pmid"><input class="input plf" data-id="' + r.id + '" data-f="subject" list="subjlist" value="' + esc(r.subject) + '" placeholder="Subject" aria-label="Subject">' +
+          '<input class="input plf" data-id="' + r.id + '" data-f="topic" value="' + esc(r.topic) + '" placeholder="What will you teach?" aria-label="What will you teach"></div>' +
+          '<span class="right"><label class="tick"><input type="checkbox" class="pdone" data-id="' + r.id + '"' + (r.done ? " checked" : "") + '><span>Done</span></label>' +
+          '<button class="xbtn" data-act="planrm" data-id="' + r.id + '" aria-label="Remove period">×</button></span></div>'
+      )
+      .join("");
+    return (
+      bar +
+      '<div class="savebar"><span class="pill ' + (plan.rows.length && done === plan.rows.length ? "good" : "na") + '">' + done + " of " + plan.rows.length + ' periods done</span><button class="btn small" data-act="planadd">+ Add period</button></div>' +
+      '<div class="ledger">' + (rows || '<div class="row"><span></span><span class="muted">No periods. Press “Add period”.</span><span></span></div>') + "</div>" +
+      '<datalist id="subjlist">' + subjectList().map((x) => "<option>" + esc(x) + "</option>").join("") + "</datalist>" +
+      '<div class="panel"><h2>Notes for the day</h2><textarea class="input" id="plannote" placeholder="Things to remember, e.g. bring chart paper, PTM at 2 pm">' + esc(plan.note) + "</textarea></div>"
+    );
+  }
+
+  /* ----- To-do ----- */
+  function suggestions(): { key: string; text: string }[] {
+    const st = D();
+    const out: { key: string; text: string }[] = [];
+    if (!st.students.length) return out;
+    const wd = new Date().getDay();
+    if (wd !== 0 && wd !== 6 && !st.attendance[TODAY]) out.push({ key: "att:" + TODAY, text: "Mark today’s attendance" });
+    const days = Object.keys(st.attendance).sort().slice(-3);
+    if (days.length === 3)
+      st.students.forEach((s) => {
+        if (days.every((d) => st.attendance[d][s.id] === false))
+          out.push({ key: "abs3:" + s.id + ":" + days[2], text: "Call " + s.name + "’s parents" + (s.phone ? " (" + s.phone + ")" : "") + ": absent 3 school days in a row" });
+      });
+    st.tests.forEach((t) => {
+      if (entered(t) === 0) out.push({ key: "marks:" + t.id, text: "Enter marks for " + t.subject + " · " + t.name });
+    });
+    if (st.llDate) {
+      const gap = (Date.parse(TODAY) - Date.parse(st.llDate)) / 864e5;
+      if (gap >= 30) out.push({ key: "ll:" + st.llDate, text: "Check reading and maths levels (last checked " + fmtShort(st.llDate) + ")" });
+    } else out.push({ key: "ll:none", text: "Add baseline reading and maths levels" });
+    const low = st.students.filter((s) => {
+      const p = attStats(s.id).pct;
+      return p != null && p < 75;
+    });
+    if (low.length) out.push({ key: "lowatt:" + TODAY.slice(0, 7), text: "Meet parents of " + low.length + " student" + (low.length > 1 ? "s" : "") + " with attendance below 75%" });
+    const todos = st.todos || [],
+      dismissed = st.dismissed || [];
+    return out.filter((x) => !todos.some((t) => t.key === x.key) && dismissed.indexOf(x.key) < 0);
+  }
+  function dueChip(d: string): string {
+    if (!d) return "";
+    if (d < TODAY) return '<span class="pill bad">Overdue · ' + fmtShort(d) + "</span>";
+    if (d === TODAY) return '<span class="pill warn">Today</span>';
+    if (d === shiftDate(TODAY, 1)) return '<span class="pill na">Tomorrow</span>';
+    return '<span class="pill na">' + fmtShort(d) + "</span>";
+  }
+  function todoRow(t: Todo): string {
+    return (
+      '<div class="row todorow' + (t.done ? " isdone" : "") + '"><label class="tick"><input type="checkbox" class="tdone" data-id="' + t.id + '"' + (t.done ? " checked" : "") +
+      ' aria-label="Mark done"></label><span class="who"><b>' + esc(t.text) + "</b></span>" +
+      '<span class="right">' + (t.done ? "" : dueChip(t.due)) + '<button class="xbtn" data-act="todorm" data-id="' + t.id + '" aria-label="Delete task">×</button></span></div>'
+    );
+  }
+  function todoView(): string {
+    const st = D();
+    const todos = st.todos || [];
+    const open = todos.filter((t) => !t.done).sort((a, b) => (a.due || "9999") < (b.due || "9999") ? -1 : (a.due || "9999") > (b.due || "9999") ? 1 : 0);
+    const done = todos.filter((t) => t.done);
+    const sug = suggestions();
+    const form =
+      '<form id="f-todo" class="panel"><div class="todoadd"><div class="field"><label for="td-text">New task</label><input class="input" id="td-text" required placeholder="e.g. Check UT2 Hindi copies"></div>' +
+      '<div class="field"><label for="td-due">Due (optional)</label><input class="input" id="td-due" type="date"></div><button class="btn primary" type="submit">Add</button></div></form>';
+    const sugHtml = sug.length
+      ? '<div class="panel"><h2>Suggested from your class</h2>' +
+        sug
+          .map(
+            (x) =>
+              '<div class="sugrow"><span>' + esc(x.text) + '</span><span class="actions"><button class="btn small" data-act="sugadd" data-key="' + esc(x.key) + '">Add</button>' +
+              '<button class="link" data-act="sugno" data-key="' + esc(x.key) + '">Dismiss</button></span></div>'
+          )
+          .join("") +
+        "</div>"
+      : "";
+    const list =
+      '<div class="ledger">' + (open.length ? open.map(todoRow).join("") : '<div class="row"><span></span><span class="muted">Nothing to do. Add a task above.</span><span></span></div>') + "</div>";
+    const doneHtml = done.length
+      ? '<div><button class="link" data-act="todoshowdone">' + (showDone ? "Hide" : "Show") + " " + done.length + " done task" + (done.length > 1 ? "s" : "") + "</button></div>" +
+        (showDone ? '<div class="ledger">' + done.map(todoRow).join("") + "</div>" : "")
+      : "";
+    return form + sugHtml + list + doneHtml;
+  }
+
+  /* ----- Parent meeting ----- */
+  function subjectTrend(id: string): { subject: string; from: number; to: number }[] {
+    const by: Record<string, number[]> = {};
+    testsAsc().forEach((t) => {
+      const m = t.marks[id];
+      if (m == null) return;
+      (by[t.subject] = by[t.subject] || []).push(Math.round((m / t.max) * 100));
+    });
+    return Object.keys(by)
+      .filter((k) => by[k].length >= 2)
+      .map((k) => ({ subject: k, from: by[k][0], to: by[k][by[k].length - 1] }));
+  }
+  function ptmPoints(s: Student): { good: string[]; discuss: string[]; ask: string[]; home: string[] } {
+    const F = s.name.split(" ")[0];
+    const a = attStats(s.id);
+    const subs = subjectsFor(s.id)
+      .filter((x) => x.max)
+      .map((x) => ({ subject: x.subject, p: Math.round((x.got / x.max) * 100) }));
+    const best = subs.length ? subs.reduce((x, y) => (y.p > x.p ? y : x)) : null;
+    const weak = subs.length ? subs.reduce((x, y) => (y.p < x.p ? y : x)) : null;
+    const trend = subjectTrend(s.id);
+    const rd = llOf("lit", s.id),
+      mt = llOf("math", s.id);
+    const rg = growthOf(rd);
+    const absentTests = testsAsc().filter((t) => t.marks[s.id] == null).length;
+    const good: string[] = [],
+      discuss: string[] = [],
+      ask: string[] = [],
+      home: string[] = [];
+
+    if (best && best.p >= 60) good.push("Doing well in " + best.subject + " (" + best.p + "%)");
+    trend.filter((t) => t.to - t.from >= 10).slice(0, 1).forEach((t) => good.push(t.subject + " marks went up from " + t.from + "% to " + t.to + "%"));
+    if (rd && rg != null && rg >= 1) good.push("Reading grew from " + lvLabel(rd.base) + " to " + lvLabel(rd.now) + " level");
+    if (a.pct != null && a.pct >= 90) good.push("Comes to school regularly (" + a.pct + "%)");
+    if (!good.length) good.push("Write one thing " + F + " does well: ________________");
+
+    if (a.pct != null && a.pct < 75) discuss.push("Attendance is " + a.pct + "% (" + (a.t - a.p) + " days missed)");
+    if (weak && weak.p < 40) discuss.push(weak.subject + " marks are low (" + weak.p + "%)");
+    trend.filter((t) => t.from - t.to >= 10).slice(0, 1).forEach((t) => discuss.push(t.subject + " marks dropped from " + t.from + "% to " + t.to + "%"));
+    if (rd && bandOf(rd.now) === 2) discuss.push("Reading is at " + lvLabel(rd.now) + " level, 3+ years below Grade " + gradeNum());
+    if (mt && bandOf(mt.now) === 2) discuss.push("Maths is at " + lvLabel(mt.now) + " level, 3+ years below Grade " + gradeNum());
+    if (absentTests) discuss.push("Missed " + absentTests + " test" + (absentTests > 1 ? "s" : ""));
+    if (!discuss.length) discuss.push("No major concerns. Share the next goal for " + F + ".");
+
+    ask.push("Does " + F + " read or study at home? At what time?");
+    if (a.pct != null && a.pct < 75) ask.push("What makes it hard for " + F + " to come to school every day?");
+    ask.push("Is there anything at home we should know about?");
+
+    if (rd && bandOf(rd.now) !== 0) home.push("Read aloud together for 10 minutes every day (use the reading practice sheet)");
+    if (weak && weak.p < 60) home.push("Practise " + weak.subject + " for 10 minutes daily");
+    if (mt && bandOf(mt.now) === 2 && home.length < 3) home.push("Practise tables and simple sums at home");
+    if (a.pct != null && a.pct < 75 && home.length < 3) home.push("Send " + F + " to school every day, on time");
+    if (!home.length) home.push("Keep praising " + F + "’s effort and ask about school every day");
+    return { good: good.slice(0, 3), discuss: discuss.slice(0, 4), ask: ask.slice(0, 3), home: home.slice(0, 3) };
+  }
+  function ptmCard(s: Student, forPrint: boolean): string {
+    const st = D();
+    const a = attStats(s.id),
+      avg = avgPct(s.id);
+    const rd = llOf("lit", s.id),
+      mt = llOf("math", s.id);
+    const pts = ptmPoints(s);
+    const note = (st.ptmNotes || {})[s.id] || "";
+    const ul = (xs: string[]) => "<ul>" + xs.map((x) => "<li>" + esc(x) + "</li>").join("") + "</ul>";
+    return (
+      '<article class="rc ptm"><header class="rc-head"><span class="eyebrow">Parent–teacher meeting' + (st.ptmDate ? " · " + fmt(st.ptmDate) : "") + "</span><h3>" + esc(s.name) +
+      '</h3><span class="muted">Roll ' + s.roll + " · Class " + esc(st.cls.grade) + "-" + esc(st.cls.section) + (s.phone ? " · Parent " + esc(s.phone) : "") + "</span></header>" +
+      '<div class="ptm-facts"><div><span>Attendance</span><b>' + (a.pct == null ? "—" : a.pct + "%") + "</b></div><div><span>Average marks</span><b>" + (avg == null ? "—" : avg + "% · " + grade(avg)) +
+      "</b></div><div><span>Reading</span><b>" + (rd ? lvLabel(rd.now) : "—") + "</b></div><div><span>Maths</span><b>" + (mt ? lvLabel(mt.now) : "—") + "</b></div></div>" +
+      '<div class="ptm-grid"><div class="ptm-sec good"><h4>Going well</h4>' + ul(pts.good) + '</div><div class="ptm-sec warn"><h4>To discuss</h4>' + ul(pts.discuss) + "</div>" +
+      '<div class="ptm-sec"><h4>Ask the parents</h4>' + ul(pts.ask) + '</div><div class="ptm-sec"><h4>Agree on home support</h4>' + ul(pts.home) + "</div></div>" +
+      '<div class="ptm-sec"><h4>Notes from the meeting</h4>' +
+      (forPrint
+        ? note
+          ? "<p>" + esc(note) + "</p>"
+          : '<div class="lines"><i></i><i></i><i></i></div>'
+        : '<textarea class="input ptmnote" data-id="' + s.id + '" placeholder="What did the parents say? What did you agree?">' + esc(note) + "</textarea>") +
+      "</div>" +
+      '<div class="rc-sign"><div>Teacher</div><div>Parent</div><div>Next check-in</div></div></article>'
+    );
+  }
+  function ptmList(): Student[] {
+    const st = D();
+    return ptmFilter === "need" ? needsAttention() : st.students;
+  }
+  function ptmView(): string {
+    const st = D();
+    if (!st.students.length) return '<div class="panel empty"><h2>No students yet</h2><button class="btn primary" data-act="go" data-view="students" data-add="1">Add students</button></div>';
+    const need = needsAttention().length;
+    const list = ptmList();
+    const top =
+      '<div class="panel"><div class="grid2"><div class="field"><label for="ptmdate">Meeting date</label><input class="input" id="ptmdate" type="date" value="' + esc(st.ptmDate || "") + '"></div>' +
+      '<div class="field"><label>Which students</label><div class="filters" style="min-height:44px;align-items:center">' +
+      '<button class="fbtn' + (ptmFilter === "need" ? " on" : "") + '" data-act="ptmfilter" data-f="need">Need attention · ' + need + "</button>" +
+      '<button class="fbtn' + (ptmFilter === "all" ? " on" : "") + '" data-act="ptmfilter" data-f="all">All students · ' + st.students.length + "</button></div></div></div></div>";
+    let body: string;
+    let printing: Student[];
+    if (ptmOne) {
+      const s = st.students.find((x) => x.id === ptmOne);
+      printing = s ? [s] : [];
+      body =
+        '<div class="savebar"><button class="link" data-act="ptmback">← All agendas</button><button class="btn small" data-act="ptmprint">Print this agenda</button></div>' +
+        '<div class="cards">' + (s ? ptmCard(s, false) : "") + "</div>";
+    } else {
+      printing = list;
+      body =
+        '<div class="savebar"><span class="muted">' + list.length + " agenda" + (list.length === 1 ? "" : "s") + ". Tap a student to open and add notes.</span>" +
+        (list.length ? '<button class="btn primary small" data-act="ptmprint">Print ' + list.length + " agenda" + (list.length === 1 ? "" : "s") + "</button>" : "") + "</div>" +
+        '<div class="ledger"><div class="lhead"><span>Roll</span><span>Student · main point</span><span>Att · Marks</span></div>' +
+        (list.length
+          ? list
+              .map((s) => {
+                const p = ptmPoints(s);
+                return (
+                  '<button class="row" data-act="ptmone" data-id="' + s.id + '"><span class="roll">' + String(s.roll).padStart(2, "0") + '</span><span class="who"><b>' + esc(s.name) + "</b><span>" + esc(p.discuss[0]) +
+                  '</span></span><span class="right">' + attPill(attStats(s.id).pct) + mkPill(avgPct(s.id)) + "</span></button>"
+                );
+              })
+              .join("")
+          : '<div class="row"><span></span><span class="muted">No students need attention right now.</span><span></span></div>') +
+        "</div>";
+    }
+    return top + body + '<div class="print-only cards">' + printing.map((s) => "<div>" + ptmCard(s, true) + "</div>").join("") + "</div>";
+  }
+
+  /* ----- Agenda on the home page ----- */
+  function agendaHomePanel(): string {
+    const st = D();
+    const plan = (st.plans || {})[TODAY];
+    const open = (st.todos || []).filter((t) => !t.done).sort((a, b) => ((a.due || "9999") < (b.due || "9999") ? -1 : 1));
+    const sug = suggestions().length;
+    const planLine = plan && plan.rows.length
+      ? plan.rows.filter((r) => r.done).length + " of " + plan.rows.length + " periods done"
+      : "No plan for today yet";
+    const next = plan ? plan.rows.find((r) => !r.done) : null;
+    return (
+      '<div class="two"><div class="panel"><div class="phead"><h2>Today’s plan</h2><button class="link" data-act="go" data-view="agenda" data-tab="plan">Open plan</button></div>' +
+      '<p><b>' + planLine + "</b></p>" + (next ? '<p class="muted">Next: ' + esc(next.time) + " · " + esc(next.subject || "Period") + (next.topic ? ": " + esc(next.topic) : "") + "</p>" : "") +
+      '</div><div class="panel"><div class="phead"><h2>To-do</h2><button class="link" data-act="go" data-view="agenda" data-tab="todo">All tasks</button></div>' +
+      (open.length ? open.slice(0, 3).map((t) => '<div class="sugrow"><span>' + esc(t.text) + "</span>" + dueChip(t.due) + "</div>").join("") : '<p class="muted">No open tasks.</p>') +
+      (sug ? '<p class="muted" style="font-size:.85rem">' + sug + " suggested task" + (sug > 1 ? "s" : "") + " waiting</p>" : "") +
+      "</div></div>"
+    );
+  }
+
   /* ---------- events ---------- */
   function onClick(e: MouseEvent): void {
     const el = (e.target as HTMLElement | null)?.closest<HTMLElement>("[data-act]");
@@ -1261,6 +1614,10 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
     const a = ds.act;
     if (a === "go") {
       if (ds.add) addOpen = true;
+      if (ds.view === "agenda" && ds.tab) {
+        agTab = ds.tab as AgTab;
+        ptmOne = null;
+      }
       if (ds.view === "reports") reportOne = null;
       go(ds.view as View, ds.param);
     } else if (a === "authtab") {
@@ -1284,6 +1641,9 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       newTestOpen = false;
       query = "";
       authTab = "login";
+      agTab = "plan";
+      planDate = TODAY;
+      ptmOne = null;
       render();
       window.scrollTo(0, 0);
     }
@@ -1400,6 +1760,68 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       printGroup = a === "sheetprint" ? ds.key || null : null;
       render();
       setTimeout(() => window.print(), 60);
+    } else if (a === "agtab") {
+      agTab = (ds.tab as AgTab) || "plan";
+      ptmOne = null;
+      render();
+    } else if (a === "planday") {
+      const d = Number(ds.d);
+      planDate = d === 0 ? TODAY : shiftDate(planDate, d);
+      render();
+    } else if (a === "plannew" || a === "plancopy") {
+      st.plans = st.plans || {};
+      const from = a === "plancopy" && ds.from ? st.plans[ds.from] : null;
+      st.plans[planDate] = {
+        rows: from
+          ? from.rows.map((r) => ({ id: uid(), time: r.time, subject: r.subject, topic: "", done: false }))
+          : PERIOD_TIMES.map((t) => ({ id: uid(), time: t, subject: "", topic: "", done: false })),
+        note: "",
+      };
+      render();
+    } else if (a === "planadd") {
+      const plan = (st.plans || {})[planDate];
+      if (!plan) return;
+      plan.rows.push({ id: uid(), time: "", subject: "", topic: "", done: false });
+      render();
+      const ins = root.querySelectorAll<HTMLInputElement>(".planrow .pt");
+      if (ins.length) ins[ins.length - 1].focus();
+    } else if (a === "planrm" && ds.id) {
+      const plan = (st.plans || {})[planDate];
+      if (!plan) return;
+      plan.rows = plan.rows.filter((r) => r.id !== ds.id);
+      render();
+    } else if (a === "todorm" && ds.id) {
+      st.todos = (st.todos || []).filter((t) => t.id !== ds.id);
+      render();
+    } else if (a === "sugadd" && ds.key) {
+      const sg = suggestions().find((x) => x.key === ds.key);
+      if (!sg) return;
+      (st.todos = st.todos || []).push({ id: uid(), text: sg.text, done: false, due: TODAY, key: sg.key });
+      render();
+      toast("Added to your to-do list");
+    } else if (a === "sugno" && ds.key) {
+      (st.dismissed = st.dismissed || []).push(ds.key);
+      render();
+    } else if (a === "todoshowdone") {
+      showDone = !showDone;
+      render();
+    } else if (a === "ptmfilter") {
+      ptmFilter = ds.f === "all" ? "all" : "need";
+      ptmOne = null;
+      render();
+    } else if (a === "ptmone" && ds.id) {
+      ptmOne = ds.id;
+      render();
+      window.scrollTo(0, 0);
+    } else if (a === "ptmopen" && ds.id) {
+      agTab = "ptm";
+      ptmOne = ds.id;
+      go("agenda");
+    } else if (a === "ptmback") {
+      ptmOne = null;
+      render();
+    } else if (a === "ptmprint") {
+      window.print();
     } else if (a === "reportlist") {
       reportsShown = false;
       reportOne = null;
@@ -1477,6 +1899,13 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       addOpen = false;
       render();
       toast(lines.length + " students added");
+    } else if (f.id === "f-todo") {
+      const text = v("td-text");
+      if (!text) return;
+      (st.todos = st.todos || []).push({ id: uid(), text, done: false, due: v("td-due") });
+      render();
+      const box = byId<HTMLInputElement>("td-text");
+      if (box) box.focus();
     } else if (f.id === "f-newtest") {
       const max = parseInt(v("n-max"), 10);
       if (!(max > 0)) return;
@@ -1518,6 +1947,19 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       const errs = root.querySelectorAll(".mk.err").length,
         te = byId("terr");
       if (te) te.textContent = errs ? errs + " mark" + (errs > 1 ? "s are" : " is") + " above " + t.max + " or not a number" : "";
+    } else if (el.classList.contains("plf") && el.dataset.id && el.dataset.f) {
+      const plan = (st.plans || {})[planDate];
+      const r = plan ? plan.rows.find((x) => x.id === el.dataset.id) : null;
+      const f = el.dataset.f;
+      if (r && (f === "time" || f === "subject" || f === "topic")) r[f] = el.value;
+      save();
+    } else if (el.id === "plannote") {
+      const plan = (st.plans || {})[planDate];
+      if (plan) plan.note = el.value;
+      save();
+    } else if (el.classList.contains("ptmnote") && el.dataset.id) {
+      (st.ptmNotes = st.ptmNotes || {})[el.dataset.id] = el.value;
+      save();
     } else if (el.id === "remark" || el.classList.contains("rmk")) {
       const s = st.students.find((x) => x.id === el.dataset.id);
       if (s) s.remark = el.value;
@@ -1532,6 +1974,27 @@ export function startKaksha(root: HTMLElement, toastEl: HTMLElement): () => void
       const rr = S.ll[llSub][el.dataset.id];
       if (rr) rr.now = Number(el.value);
       save();
+    }
+    const st = S;
+    if (el.classList.contains("pdone") && el.dataset.id) {
+      const plan = (st.plans || {})[planDate];
+      const r = plan ? plan.rows.find((x) => x.id === el.dataset.id) : null;
+      if (r) r.done = (el as HTMLInputElement).checked;
+      render();
+    }
+    if (el.classList.contains("tdone") && el.dataset.id) {
+      const t = (st.todos || []).find((x) => x.id === el.dataset.id);
+      if (t) t.done = (el as HTMLInputElement).checked;
+      render();
+      if (t && t.done) toast("Done: " + t.text);
+    }
+    if (el.id === "plandate" && el.value) {
+      planDate = el.value;
+      render();
+    }
+    if (el.id === "ptmdate") {
+      st.ptmDate = el.value;
+      render();
     }
     if (el.id === "attdate" && el.value) {
       attDate = el.value > TODAY ? TODAY : el.value;
